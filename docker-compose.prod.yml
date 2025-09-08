@@ -1,0 +1,130 @@
+version: '3.8'
+
+services:
+  aem-read-server:
+    build:
+      context: .
+      dockerfile: packages/read-server/Dockerfile
+      target: production
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - AEM_HOST=${AEM_HOST}
+      - AEM_CLIENT_ID=${AEM_CLIENT_ID}
+      - AEM_CLIENT_SECRET=${AEM_CLIENT_SECRET}
+      - AEM_TECHNICAL_ACCOUNT_ID=${AEM_TECHNICAL_ACCOUNT_ID}
+      - AEM_ORGANIZATION_ID=${AEM_ORGANIZATION_ID}
+      - AEM_PRIVATE_KEY=${AEM_PRIVATE_KEY}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - RATE_LIMIT_REQUESTS=${READ_RATE_LIMIT_REQUESTS:-100}
+      - RATE_LIMIT_WINDOW=${READ_RATE_LIMIT_WINDOW:-60000}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - aem-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.aem-read.rule=Host(`aem-read.${DOMAIN:-localhost}`)"
+      - "traefik.http.routers.aem-read.tls=true"
+      - "traefik.http.routers.aem-read.tls.certresolver=letsencrypt"
+      - "traefik.http.services.aem-read.loadbalancer.server.port=3001"
+
+  aem-write-server:
+    build:
+      context: .
+      dockerfile: packages/write-server/Dockerfile
+      target: production
+    ports:
+      - "3002:3002"
+    environment:
+      - NODE_ENV=production
+      - AEM_HOST=${AEM_HOST}
+      - AEM_CLIENT_ID=${AEM_CLIENT_ID}
+      - AEM_CLIENT_SECRET=${AEM_CLIENT_SECRET}
+      - AEM_TECHNICAL_ACCOUNT_ID=${AEM_TECHNICAL_ACCOUNT_ID}
+      - AEM_ORGANIZATION_ID=${AEM_ORGANIZATION_ID}
+      - AEM_PRIVATE_KEY=${AEM_PRIVATE_KEY}
+      - API_KEY=${API_KEY}
+      - ALLOWED_IPS=${ALLOWED_IPS:-127.0.0.1,::1}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - RATE_LIMIT_REQUESTS=${WRITE_RATE_LIMIT_REQUESTS:-50}
+      - RATE_LIMIT_WINDOW=${WRITE_RATE_LIMIT_WINDOW:-60000}
+      - ENABLE_AUDIT_LOG=${ENABLE_AUDIT_LOG:-true}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - aem-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.aem-write.rule=Host(`aem-write.${DOMAIN:-localhost}`)"
+      - "traefik.http.routers.aem-write.tls=true"
+      - "traefik.http.routers.aem-write.tls.certresolver=letsencrypt"
+      - "traefik.http.services.aem-write.loadbalancer.server.port=3002"
+
+  # Reverse proxy with SSL termination
+  traefik:
+    image: traefik:v2.10
+    command:
+      - "--api.dashboard=true"
+      - "--api.insecure=false"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--global.checknewversion=false"
+      - "--global.sendanonymoususage=false"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"  # Traefik dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-letsencrypt:/letsencrypt
+    networks:
+      - aem-network
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.${DOMAIN:-localhost}`)"
+      - "traefik.http.routers.traefik.tls=true"
+      - "traefik.http.routers.traefik.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik.service=api@internal"
+
+  # Redis for caching and session storage
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
+    networks:
+      - aem-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  aem-network:
+    driver: bridge
+
+volumes:
+  traefik-letsencrypt:
+    driver: local
+  redis-data:
+    driver: local

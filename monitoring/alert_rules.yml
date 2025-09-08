@@ -1,0 +1,113 @@
+groups:
+  - name: aem-servers
+    rules:
+      # Server availability alerts
+      - alert: AEMServerDown
+        expr: up{job=~"aem-.*-server"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "AEM Server {{ $labels.job }} is down"
+          description: "AEM Server {{ $labels.job }} has been down for more than 1 minute."
+
+      # High error rate alerts
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate on {{ $labels.job }}"
+          description: "Error rate is {{ $value }} errors per second on {{ $labels.job }}."
+
+      # High response time alerts
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High response time on {{ $labels.job }}"
+          description: "95th percentile response time is {{ $value }}s on {{ $labels.job }}."
+
+      # Memory usage alerts
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is above 90% for more than 5 minutes."
+
+      # Disk usage alerts
+      - alert: HighDiskUsage
+        expr: (node_filesystem_size_bytes{fstype!="tmpfs"} - node_filesystem_free_bytes{fstype!="tmpfs"}) / node_filesystem_size_bytes{fstype!="tmpfs"} > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High disk usage on {{ $labels.device }}"
+          description: "Disk usage is above 80% on {{ $labels.device }}."
+
+      # CPU usage alerts
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is above 80% for more than 5 minutes."
+
+      # Rate limiting alerts
+      - alert: RateLimitExceeded
+        expr: rate(http_requests_total{status="429"}[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Rate limit exceeded on {{ $labels.job }}"
+          description: "Rate limit is being exceeded on {{ $labels.job }}."
+
+      # AEM connection alerts
+      - alert: AEMConnectionFailed
+        expr: aem_connection_failures_total > 10
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "AEM connection failures on {{ $labels.job }}"
+          description: "Multiple AEM connection failures detected on {{ $labels.job }}."
+
+  - name: containers
+    rules:
+      # Container restart alerts
+      - alert: ContainerRestarted
+        expr: increase(container_start_time_seconds[1h]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} restarted"
+          description: "Container {{ $labels.name }} has restarted in the last hour."
+
+      # Container memory alerts
+      - alert: ContainerHighMemory
+        expr: container_memory_usage_bytes / container_spec_memory_limit_bytes > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} high memory usage"
+          description: "Container {{ $labels.name }} memory usage is above 80%."
+
+      # Container CPU alerts
+      - alert: ContainerHighCPU
+        expr: rate(container_cpu_usage_seconds_total[5m]) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container {{ $labels.name }} high CPU usage"
+          description: "Container {{ $labels.name }} CPU usage is above 80%."
