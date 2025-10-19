@@ -388,14 +388,50 @@ export class AEMHttpClient {
    * Refresh OAuth token
    */
   private async refreshOAuthToken(auth: AEMCredentials): Promise<void> {
-    // Implementation depends on AEMaaCS OAuth flow
-    // This is a placeholder for the actual OAuth implementation
-    this.logger.warn('OAuth token refresh not yet implemented');
-    
-    // For now, use the provided access token if available
-    if (auth.accessToken) {
-      this.authToken = auth.accessToken;
-      this.tokenExpiry = new Date(Date.now() + 3600000); // 1 hour
+    try {
+      this.logger.debug('Refreshing OAuth token');
+      
+      if (!auth.clientId || !auth.clientSecret) {
+        throw new Error('OAuth client ID and secret are required');
+      }
+
+      // For AEMaaCS, we need to use Adobe IMS for token exchange
+      const tokenEndpoint = 'https://ims-na1.adobelogin.com/ims/token/v3';
+      
+      const params = new URLSearchParams();
+      params.append('grant_type', 'client_credentials');
+      params.append('client_id', auth.clientId);
+      params.append('client_secret', auth.clientSecret);
+      params.append('scope', 'openid,AdobeID,read_organizations,additional_info.projectedProductContext');
+
+      const response = await this.axiosInstance.post(tokenEndpoint, params, {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        timeout: 30000
+      });
+
+      if (!response.data || !response.data.access_token) {
+        throw new Error('Invalid OAuth response: missing access token');
+      }
+
+      this.authToken = response.data.access_token;
+      this.tokenExpiry = new Date(Date.now() + (response.data.expires_in * 1000));
+      
+      this.logger.debug('OAuth token refreshed successfully', {
+        expiresIn: response.data.expires_in,
+        tokenType: response.data.token_type
+      });
+
+    } catch (error) {
+      this.logger.error('Failed to refresh OAuth token', error as Error);
+      throw new AEMException(
+        'OAuth token refresh failed',
+        'AUTHENTICATION_ERROR',
+        true,
+        60000, // Retry after 1 minute
+        { originalError: error }
+      );
     }
   }
 
@@ -403,15 +439,95 @@ export class AEMHttpClient {
    * Refresh service account token
    */
   private async refreshServiceAccountToken(auth: AEMCredentials): Promise<void> {
-    // Implementation depends on AEMaaCS service account flow
-    // This is a placeholder for the actual service account implementation
-    this.logger.warn('Service account token refresh not yet implemented');
-    
-    // For now, use the provided access token if available
-    if (auth.accessToken) {
-      this.authToken = auth.accessToken;
-      this.tokenExpiry = new Date(Date.now() + 3600000); // 1 hour
+    try {
+      this.logger.debug('Refreshing service account token');
+      
+      if (!auth.clientId || !auth.clientSecret) {
+        throw new Error('Service account client ID and secret are required');
+      }
+
+      // For AEMaaCS service accounts, we need to generate a JWT and exchange it for an access token
+      const jwt = this.generateServiceAccountJWT(auth);
+      
+      const tokenEndpoint = 'https://ims-na1.adobelogin.com/ims/exchange/jwt';
+      
+      const params = new URLSearchParams();
+      params.append('client_id', auth.clientId);
+      params.append('client_secret', auth.clientSecret);
+      params.append('jwt_token', jwt);
+
+      const response = await this.axiosInstance.post(tokenEndpoint, params, {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        timeout: 30000
+      });
+
+      if (!response.data || !response.data.access_token) {
+        throw new Error('Invalid service account response: missing access token');
+      }
+
+      this.authToken = response.data.access_token;
+      this.tokenExpiry = new Date(Date.now() + (response.data.expires_in * 1000));
+      
+      this.logger.debug('Service account token refreshed successfully', {
+        expiresIn: response.data.expires_in,
+        tokenType: response.data.token_type
+      });
+
+    } catch (error) {
+      this.logger.error('Failed to refresh service account token', error as Error);
+      throw new AEMException(
+        'Service account token refresh failed',
+        'AUTHENTICATION_ERROR',
+        true,
+        60000, // Retry after 1 minute
+        { originalError: error }
+      );
     }
+  }
+
+  /**
+   * Generate JWT for service account authentication
+   */
+  private generateServiceAccountJWT(auth: AEMCredentials): string {
+    const crypto = require('crypto');
+    
+    // JWT header
+    const header = {
+      alg: 'RS256',
+      typ: 'JWT'
+    };
+
+    // JWT payload
+    const now = Math.floor(Date.now() / 1000);
+    const payload = {
+      iss: auth.clientId,
+      sub: auth.clientId, // For service accounts, subject is same as issuer
+      aud: 'https://ims-na1.adobelogin.com/c/' + auth.clientId,
+      exp: now + 3600, // Token expires in 1 hour
+      iat: now,
+      scope: 'openid,AdobeID,read_organizations,additional_info.projectedProductContext'
+    };
+
+    // Encode header and payload
+    const encodedHeader = Buffer.from(JSON.stringify(header)).toString('base64url');
+    const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64url');
+    
+    // Create signature
+    const signatureInput = `${encodedHeader}.${encodedPayload}`;
+    const privateKey = auth.privateKey || process.env.AEM_PRIVATE_KEY;
+    
+    if (!privateKey) {
+      throw new Error('Private key is required for service account authentication');
+    }
+
+    const signature = crypto
+      .createSign('RSA-SHA256')
+      .update(signatureInput)
+      .sign(privateKey, 'base64url');
+
+    return `${signatureInput}.${signature}`;
   }
 
   /**

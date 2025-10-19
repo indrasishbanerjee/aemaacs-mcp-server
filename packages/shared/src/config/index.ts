@@ -161,9 +161,14 @@ const configSchema = Joi.object({
 export class ConfigManager {
   private static instance: ConfigManager;
   private config: ServerConfig;
+  private configWatcher?: NodeJS.Timeout;
+  private configFile?: string;
+  private lastModified?: number;
+  private configListeners: Set<() => void> = new Set();
 
   private constructor() {
     this.config = this.loadConfig();
+    this.startConfigWatcher();
   }
 
   static getInstance(): ConfigManager {
@@ -307,7 +312,15 @@ export class ConfigManager {
    * Reload configuration (useful for hot-reloading in development)
    */
   reloadConfig(): void {
-    this.config = this.loadConfig();
+    const oldConfig = this.config;
+    try {
+      this.config = this.loadConfig();
+      this.notifyConfigListeners();
+      console.log('Configuration reloaded successfully');
+    } catch (error) {
+      console.error('Failed to reload configuration, keeping old config:', error);
+      this.config = oldConfig;
+    }
   }
 
   /**
@@ -323,5 +336,122 @@ export class ConfigManager {
         errors: [error.message]
       };
     }
+  }
+
+  /**
+   * Add configuration change listener
+   */
+  addConfigListener(listener: () => void): void {
+    this.configListeners.add(listener);
+  }
+
+  /**
+   * Remove configuration change listener
+   */
+  removeConfigListener(listener: () => void): void {
+    this.configListeners.delete(listener);
+  }
+
+  /**
+   * Start configuration file watcher for hot-reload
+   */
+  private startConfigWatcher(): void {
+    // Only enable hot-reload in development mode
+    if (process.env.NODE_ENV !== 'development') {
+      return;
+    }
+
+    this.configFile = process.env.CONFIG_FILE || '.env';
+    
+    // Check for config file changes every 5 seconds
+    this.configWatcher = setInterval(() => {
+      this.checkConfigFileChanges();
+    }, 5000);
+  }
+
+  /**
+   * Check for configuration file changes
+   */
+  private async checkConfigFileChanges(): Promise<void> {
+    if (!this.configFile) {
+      return;
+    }
+
+    try {
+      const fs = await import('fs/promises');
+      const stats = await fs.stat(this.configFile);
+      
+      if (this.lastModified && stats.mtime.getTime() > this.lastModified) {
+        this.lastModified = stats.mtime.getTime();
+        this.reloadConfig();
+      } else if (!this.lastModified) {
+        this.lastModified = stats.mtime.getTime();
+      }
+    } catch (error) {
+      // Config file might not exist, ignore error
+    }
+  }
+
+  /**
+   * Notify all configuration listeners
+   */
+  private notifyConfigListeners(): void {
+    for (const listener of this.configListeners) {
+      try {
+        listener();
+      } catch (error) {
+        console.error('Error in configuration listener:', error);
+      }
+    }
+  }
+
+  /**
+   * Stop configuration watcher
+   */
+  stopConfigWatcher(): void {
+    if (this.configWatcher) {
+      clearInterval(this.configWatcher);
+      this.configWatcher = undefined;
+    }
+  }
+
+  /**
+   * Get configuration summary for debugging
+   */
+  getConfigSummary(): Record<string, any> {
+    return {
+      aem: {
+        host: this.config.aem.host,
+        port: this.config.aem.port,
+        protocol: this.config.aem.protocol,
+        authType: this.config.aem.authentication.type
+      },
+      server: {
+        port: this.config.server.port,
+        host: this.config.server.host,
+        corsEnabled: this.config.server.cors.enabled
+      },
+      security: {
+        inputValidation: this.config.security.enableInputValidation,
+        auditLogging: this.config.security.enableAuditLogging
+      },
+      cache: {
+        enabled: this.config.cache.enabled,
+        strategy: this.config.cache.strategy,
+        redisEnabled: !!this.config.cache.redis
+      },
+      logging: {
+        level: this.config.logging.level,
+        format: this.config.logging.format
+      }
+    };
+  }
+
+  /**
+   * Cleanup resources
+   */
+  cleanup(): void {
+    this.stopConfigWatcher();
+    this.configListeners.clear();
   }
 }

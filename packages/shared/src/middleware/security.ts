@@ -22,9 +22,13 @@ export interface SecurityMiddlewareOptions {
   enableInputValidation?: boolean;
   enableAuditLogging?: boolean;
   enableRateLimit?: boolean;
+  enableApiKeyAuth?: boolean;
+  enableIPAllowlist?: boolean;
   maxRequestSize?: string;
   allowedFileTypes?: string[];
   maxFileSize?: number;
+  allowedIPs?: string[];
+  apiKeys?: string[];
 }
 
 export class SecurityMiddleware {
@@ -40,10 +44,144 @@ export class SecurityMiddleware {
       enableInputValidation: true,
       enableAuditLogging: true,
       enableRateLimit: true,
+      enableApiKeyAuth: true,
+      enableIPAllowlist: true,
       maxRequestSize: '10mb',
       allowedFileTypes: securityConfig.allowedFileTypes,
       maxFileSize: securityConfig.maxFileSize,
+      allowedIPs: securityConfig.allowedIPs || [],
+      apiKeys: securityConfig.apiKeys || [],
       ...options
+    };
+  }
+
+  /**
+   * API key validation middleware
+   */
+  validateApiKey() {
+    return (req: Request, res: Response, next: NextFunction) => {
+      if (!this.config.enableApiKeyAuth) {
+        return next();
+      }
+
+      const context = this.createOperationContext(req, 'api_key_validation');
+      
+      try {
+        const apiKey = req.headers['x-api-key'] as string || req.headers['authorization']?.replace('Bearer ', '');
+        
+        if (!apiKey) {
+          this.logger.logSecurityEvent('Missing API key', context, {
+            ip: req.ip,
+            path: req.path,
+            userAgent: req.get('User-Agent')
+          });
+
+          res.status(401).json({
+            success: false,
+            error: {
+              code: 'MISSING_API_KEY',
+              message: 'API key is required',
+              recoverable: false
+            }
+          });
+          return;
+        }
+
+        if (!this.config.apiKeys?.includes(apiKey)) {
+          this.logger.logSecurityEvent('Invalid API key', context, {
+            ip: req.ip,
+            path: req.path,
+            userAgent: req.get('User-Agent'),
+            providedKey: apiKey.substring(0, 8) + '...' // Log partial key for debugging
+          });
+
+          res.status(401).json({
+            success: false,
+            error: {
+              code: 'INVALID_API_KEY',
+              message: 'Invalid API key',
+              recoverable: false
+            }
+          });
+          return;
+        }
+
+        next();
+      } catch (error) {
+        this.logger.logSecurityEvent('API key validation error', context, {
+          error: error instanceof Error ? error.message : 'Unknown error',
+          ip: req.ip,
+          path: req.path
+        });
+
+        res.status(500).json({
+          success: false,
+          error: {
+            code: 'INTERNAL_ERROR',
+            message: 'API key validation failed',
+            recoverable: true
+          }
+        });
+      }
+    };
+  }
+
+  /**
+   * IP allowlisting middleware
+   */
+  validateIPAllowlist() {
+    return (req: Request, res: Response, next: NextFunction) => {
+      if (!this.config.enableIPAllowlist) {
+        return next();
+      }
+
+      const context = this.createOperationContext(req, 'ip_allowlist_validation');
+      
+      try {
+        const clientIP = this.getClientIP(req);
+        
+        if (this.config.allowedIPs && this.config.allowedIPs.length > 0) {
+          const isAllowed = this.config.allowedIPs.some(allowedIP => {
+            return this.isIPAllowed(clientIP, allowedIP);
+          });
+
+          if (!isAllowed) {
+            this.logger.logSecurityEvent('IP not in allowlist', context, {
+              clientIP,
+              path: req.path,
+              userAgent: req.get('User-Agent'),
+              allowedIPs: this.config.allowedIPs
+            });
+
+            res.status(403).json({
+              success: false,
+              error: {
+                code: 'IP_NOT_ALLOWED',
+                message: 'Access denied from this IP address',
+                recoverable: false
+              }
+            });
+            return;
+          }
+        }
+
+        next();
+      } catch (error) {
+        this.logger.logSecurityEvent('IP allowlist validation error', context, {
+          error: error instanceof Error ? error.message : 'Unknown error',
+          ip: req.ip,
+          path: req.path
+        });
+
+        res.status(500).json({
+          success: false,
+          error: {
+            code: 'INTERNAL_ERROR',
+            message: 'IP validation failed',
+            recoverable: true
+          }
+        });
+      }
     };
   }
 
@@ -549,6 +687,55 @@ export class SecurityMiddleware {
     const unitMultiplier = units[unit || 'b'] || 1;
     return numValue * unitMultiplier;
   }
+
+  /**
+   * Get client IP address from request
+   */
+  private getClientIP(req: Request): string {
+    return req.ip || 
+           req.connection.remoteAddress || 
+           req.socket.remoteAddress || 
+           (req.connection as any)?.socket?.remoteAddress ||
+           req.headers['x-forwarded-for']?.toString().split(',')[0] ||
+           req.headers['x-real-ip']?.toString() ||
+           'unknown';
+  }
+
+  /**
+   * Check if client IP is allowed
+   */
+  private isIPAllowed(clientIP: string, allowedIP: string): boolean {
+    // Handle CIDR notation (e.g., 192.168.1.0/24)
+    if (allowedIP.includes('/')) {
+      return this.isIPInCIDR(clientIP, allowedIP);
+    }
+    
+    // Handle exact match
+    return clientIP === allowedIP;
+  }
+
+  /**
+   * Check if IP is within CIDR range
+   */
+  private isIPInCIDR(ip: string, cidr: string): boolean {
+    try {
+      const [network, prefixLength] = cidr.split('/');
+      const ipNum = this.ipToNumber(ip);
+      const networkNum = this.ipToNumber(network);
+      const mask = (0xffffffff << (32 - parseInt(prefixLength))) >>> 0;
+      
+      return (ipNum & mask) === (networkNum & mask);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Convert IP address to number
+   */
+  private ipToNumber(ip: string): number {
+    return ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet), 0) >>> 0;
+  }
 }
 
 /**
@@ -565,6 +752,8 @@ export function createSecurityMiddlewares(options?: SecurityMiddlewareOptions) {
   const security = new SecurityMiddleware(options);
 
   return {
+    validateApiKey: security.validateApiKey(),
+    validateIPAllowlist: security.validateIPAllowlist(),
     rateLimit: security.createRateLimitMiddleware(),
     validateInput: security.validateInput(),
     preventPathTraversal: security.preventPathTraversal(),

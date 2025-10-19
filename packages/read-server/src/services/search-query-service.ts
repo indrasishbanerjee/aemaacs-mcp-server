@@ -804,4 +804,481 @@ export class SearchQueryService {
 
     return renditions;
   }
+
+  /**
+   * Advanced QueryBuilder search with full parameter support
+   */
+  async advancedSearch(options: AdvancedSearchOptions = {}): Promise<AEMResponse<SearchResponse>> {
+    try {
+      this.logger.debug('Executing advanced search', { options });
+
+      const params: Record<string, any> = {
+        'p.limit': options.limit || 20,
+        'p.offset': options.offset || 0
+      };
+
+      // Build advanced query parameters
+      this.buildAdvancedQueryParams(params, options);
+
+      // Add facets if requested
+      if (options.facets && options.facets.length > 0) {
+        options.facets.forEach((facet, index) => {
+          params[`${index}_facet`] = facet;
+        });
+      }
+
+      // Add boost parameters
+      if (options.boost) {
+        Object.entries(options.boost).forEach(([field, boostValue]) => {
+          params[`${field}.boost`] = boostValue;
+        });
+      }
+
+      const requestOptions: RequestOptions = {
+        cache: true,
+        cacheTtl: 300000, // Cache for 5 minutes
+        context: {
+          operation: 'advancedSearch',
+          resource: '/bin/querybuilder.json'
+        }
+      };
+
+      const response = await this.client.get<any>('/bin/querybuilder.json', params, requestOptions);
+
+      if (!response.success || !response.data) {
+        throw new AEMException(
+          'Failed to execute advanced search',
+          'SERVER_ERROR',
+          true,
+          undefined,
+          { response }
+        );
+      }
+
+      const searchResponse = this.parseAdvancedSearchResponse(response.data);
+
+      this.logger.debug('Successfully executed advanced search', { 
+        total: searchResponse.total,
+        resultCount: searchResponse.results.length,
+        facetCount: searchResponse.facets ? Object.keys(searchResponse.facets).length : 0
+      });
+
+      return {
+        success: true,
+        data: searchResponse,
+        metadata: {
+          timestamp: new Date(),
+          requestId: response.metadata?.requestId || '',
+          duration: response.metadata?.duration || 0,
+          cached: response.metadata?.cached
+        }
+      };
+
+    } catch (error) {
+      this.logger.error('Failed to execute advanced search', error as Error);
+      
+      if (error instanceof AEMException) {
+        throw error;
+      }
+      
+      throw new AEMException(
+        'Unexpected error while executing advanced search',
+        'UNKNOWN_ERROR',
+        false,
+        undefined,
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Search content fragments with advanced filtering
+   */
+  async searchContentFragments(options: ContentFragmentSearchOptions = {}): Promise<AEMResponse<SearchResponse>> {
+    try {
+      this.logger.debug('Searching content fragments', { options });
+
+      const params: Record<string, any> = {
+        'path': options.path || '/content/dam',
+        'type': 'cq:Page',
+        'p.limit': options.limit || 20,
+        'p.offset': options.offset || 0
+      };
+
+      // Search for content fragment pages
+      params['property'] = 'jcr:content/cq:template';
+      params['property.value'] = '/conf/global/settings/dam/cfm/templates/content-fragment';
+
+      // Add model filter
+      if (options.model) {
+        params['2_property'] = 'jcr:content/model';
+        params['2_property.value'] = options.model;
+      }
+
+      // Add variation filter
+      if (options.variation) {
+        params['3_property'] = 'jcr:content/variation';
+        params['3_property.value'] = options.variation;
+      }
+
+      // Add fulltext search
+      if (options.fulltext) {
+        params['fulltext'] = options.fulltext;
+      }
+
+      // Add element filters
+      if (options.elements && options.elements.length > 0) {
+        options.elements.forEach((element, index) => {
+          params[`${index + 4}_property`] = `jcr:content/data/master/${element}`;
+          params[`${index + 4}_property.value`] = options.elementValues?.[index] || '';
+        });
+      }
+
+      const requestOptions: RequestOptions = {
+        cache: true,
+        cacheTtl: 300000, // Cache for 5 minutes
+        context: {
+          operation: 'searchContentFragments',
+          resource: '/bin/querybuilder.json'
+        }
+      };
+
+      const response = await this.client.get<any>('/bin/querybuilder.json', params, requestOptions);
+
+      if (!response.success || !response.data) {
+        throw new AEMException(
+          'Failed to search content fragments',
+          'SERVER_ERROR',
+          true,
+          undefined,
+          { response }
+        );
+      }
+
+      const searchResponse = this.parseSearchResponse(response.data);
+
+      this.logger.debug('Successfully searched content fragments', { 
+        total: searchResponse.total,
+        resultCount: searchResponse.results.length
+      });
+
+      return {
+        success: true,
+        data: searchResponse,
+        metadata: {
+          timestamp: new Date(),
+          requestId: response.metadata?.requestId || '',
+          duration: response.metadata?.duration || 0,
+          cached: response.metadata?.cached
+        }
+      };
+
+    } catch (error) {
+      this.logger.error('Failed to search content fragments', error as Error);
+      
+      if (error instanceof AEMException) {
+        throw error;
+      }
+      
+      throw new AEMException(
+        'Unexpected error while searching content fragments',
+        'UNKNOWN_ERROR',
+        false,
+        undefined,
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Get search suggestions based on query
+   */
+  async getSearchSuggestions(query: string, options: SearchSuggestionOptions = {}): Promise<AEMResponse<SearchSuggestion[]>> {
+    try {
+      this.logger.debug('Getting search suggestions', { query, options });
+
+      const params: Record<string, any> = {
+        'query': query,
+        'limit': options.limit || 10
+      };
+
+      if (options.path) {
+        params['path'] = options.path;
+      }
+
+      if (options.type) {
+        params['type'] = options.type;
+      }
+
+      const requestOptions: RequestOptions = {
+        cache: true,
+        cacheTtl: 600000, // Cache for 10 minutes
+        context: {
+          operation: 'getSearchSuggestions',
+          resource: '/bin/querybuilder.json'
+        }
+      };
+
+      const response = await this.client.get<any>('/bin/querybuilder.json', params, requestOptions);
+
+      if (!response.success || !response.data) {
+        throw new AEMException(
+          'Failed to get search suggestions',
+          'SERVER_ERROR',
+          true,
+          undefined,
+          { response }
+        );
+      }
+
+      const suggestions = this.parseSearchSuggestions(response.data);
+
+      this.logger.debug('Successfully got search suggestions', { 
+        suggestionCount: suggestions.length
+      });
+
+      return {
+        success: true,
+        data: suggestions,
+        metadata: {
+          timestamp: new Date(),
+          requestId: response.metadata?.requestId || '',
+          duration: response.metadata?.duration || 0,
+          cached: response.metadata?.cached
+        }
+      };
+
+    } catch (error) {
+      this.logger.error('Failed to get search suggestions', error as Error);
+      
+      if (error instanceof AEMException) {
+        throw error;
+      }
+      
+      throw new AEMException(
+        'Unexpected error while getting search suggestions',
+        'UNKNOWN_ERROR',
+        false,
+        undefined,
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Get search facets for filtering
+   */
+  async getSearchFacets(options: SearchFacetOptions = {}): Promise<AEMResponse<SearchFacet[]>> {
+    try {
+      this.logger.debug('Getting search facets', { options });
+
+      const params: Record<string, any> = {
+        'p.limit': 0 // Only get facets, no results
+      };
+
+      // Add base search parameters
+      if (options.path) {
+        params['path'] = options.path;
+      }
+
+      if (options.type) {
+        params['type'] = options.type;
+      }
+
+      // Add facet parameters
+      if (options.facets && options.facets.length > 0) {
+        options.facets.forEach((facet, index) => {
+          params[`${index}_facet`] = facet;
+        });
+      }
+
+      const requestOptions: RequestOptions = {
+        cache: true,
+        cacheTtl: 600000, // Cache for 10 minutes
+        context: {
+          operation: 'getSearchFacets',
+          resource: '/bin/querybuilder.json'
+        }
+      };
+
+      const response = await this.client.get<any>('/bin/querybuilder.json', params, requestOptions);
+
+      if (!response.success || !response.data) {
+        throw new AEMException(
+          'Failed to get search facets',
+          'SERVER_ERROR',
+          true,
+          undefined,
+          { response }
+        );
+      }
+
+      const facets = this.parseSearchFacets(response.data);
+
+      this.logger.debug('Successfully got search facets', { 
+        facetCount: facets.length
+      });
+
+      return {
+        success: true,
+        data: facets,
+        metadata: {
+          timestamp: new Date(),
+          requestId: response.metadata?.requestId || '',
+          duration: response.metadata?.duration || 0,
+          cached: response.metadata?.cached
+        }
+      };
+
+    } catch (error) {
+      this.logger.error('Failed to get search facets', error as Error);
+      
+      if (error instanceof AEMException) {
+        throw error;
+      }
+      
+      throw new AEMException(
+        'Unexpected error while getting search facets',
+        'UNKNOWN_ERROR',
+        false,
+        undefined,
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Build advanced query parameters
+   */
+  private buildAdvancedQueryParams(params: Record<string, any>, options: AdvancedSearchOptions): void {
+    // Basic search parameters
+    if (options.path) {
+      params['path'] = options.path;
+    }
+
+    if (options.type) {
+      params['type'] = options.type;
+    }
+
+    if (options.fulltext) {
+      params['fulltext'] = options.fulltext;
+    }
+
+    // Property filters
+    if (options.filters) {
+      Object.entries(options.filters).forEach(([key, value], index) => {
+        params[`${index}_property`] = key;
+        params[`${index}_property.value`] = value;
+      });
+    }
+
+    // Ordering
+    if (options.orderBy) {
+      params['orderby'] = options.orderBy;
+      if (options.orderDirection) {
+        params['orderby.sort'] = options.orderDirection;
+      }
+    }
+
+    // Fuzzy search
+    if (options.fuzzy && options.fulltext) {
+      params['fulltext.relPath'] = 'jcr:content';
+      params['fulltext.relPath.value'] = options.fulltext + '~';
+    }
+
+    // Synonyms
+    if (options.synonyms && options.fulltext) {
+      params['fulltext.relPath'] = 'jcr:content';
+      params['fulltext.relPath.value'] = options.fulltext;
+      params['fulltext.relPath.synonyms'] = 'true';
+    }
+  }
+
+  /**
+   * Parse advanced search response with facets
+   */
+  private parseAdvancedSearchResponse(data: any): SearchResponse {
+    const hits = data.hits || [];
+    const results = hits.map((hit: any) => ({
+      path: hit.path,
+      name: hit.name || hit.path.split('/').pop(),
+      title: hit['jcr:title'] || hit.title,
+      resourceType: hit['jcr:primaryType'] || hit.resourceType,
+      lastModified: hit['jcr:lastModified'] ? new Date(hit['jcr:lastModified']) : new Date(),
+      score: hit.score,
+      excerpt: hit.excerpt,
+      properties: { ...hit }
+    }));
+
+    return {
+      total: data.total || 0,
+      results,
+      facets: data.facets,
+      spellcheck: data.spellcheck
+    };
+  }
+
+  /**
+   * Parse search suggestions
+   */
+  private parseSearchSuggestions(data: any): SearchSuggestion[] {
+    const suggestions = data.suggestions || [];
+    
+    return suggestions.map((suggestion: any) => ({
+      text: suggestion.text,
+      type: suggestion.type,
+      count: suggestion.count,
+      path: suggestion.path
+    }));
+  }
+
+  /**
+   * Parse search facets
+   */
+  private parseSearchFacets(data: any): SearchFacet[] {
+    const facets = data.facets || {};
+    
+    return Object.entries(facets).map(([name, values]: [string, any]) => ({
+      name,
+      values: Array.isArray(values) ? values : Object.entries(values).map(([value, count]) => ({
+        value,
+        count: typeof count === 'number' ? count : 0
+      }))
+    }));
+  }
+}
+
+// Additional interfaces for advanced search
+export interface ContentFragmentSearchOptions extends SearchOptions {
+  model?: string;
+  variation?: string;
+  elements?: string[];
+  elementValues?: string[];
+}
+
+export interface SearchSuggestionOptions {
+  path?: string;
+  type?: string;
+  limit?: number;
+}
+
+export interface SearchSuggestion {
+  text: string;
+  type: string;
+  count: number;
+  path?: string;
+}
+
+export interface SearchFacetOptions {
+  path?: string;
+  type?: string;
+  facets?: string[];
+}
+
+export interface SearchFacet {
+  name: string;
+  values: Array<{
+    value: string;
+    count: number;
+  }>;
 }

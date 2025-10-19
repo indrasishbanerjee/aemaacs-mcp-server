@@ -853,4 +853,520 @@ export class AssetManagementService {
     
     this.logger.warn(`Asset processing timed out after ${maxAttempts} attempts`);
   }
+
+  /**
+   * Get asset processing status
+   */
+  async getAssetProcessingStatus(assetPath: string): Promise<AEMResponse<AssetProcessingStatus>> {
+    try {
+      this.logger.debug('Getting asset processing status', { assetPath });
+
+      if (!assetPath) {
+        throw new AEMException(
+          'Asset path is required',
+          'VALIDATION_ERROR',
+          false
+        );
+      }
+
+      const requestOptions: RequestOptions = {
+        cache: true,
+        cacheTtl: 30000, // Cache for 30 seconds
+        context: {
+          operation: 'getAssetProcessingStatus',
+          resource: assetPath
+        }
+      };
+
+      const response = await this.client.get<any>(
+        `${assetPath}/jcr:content/processing-status.json`,
+        undefined,
+        requestOptions
+      );
+
+      if (!response.success || !response.data) {
+        throw new AEMException(
+          `Asset processing status not found: ${assetPath}`,
+          'NOT_FOUND_ERROR',
+          false,
+          undefined,
+          { assetPath }
+        );
+      }
+
+      const status = this.parseAssetProcessingStatus(response.data, assetPath);
+
+      this.logger.debug('Successfully retrieved asset processing status', { 
+        assetPath,
+        status: status.status
+      });
+
+      return {
+        success: true,
+        data: status,
+        metadata: {
+          timestamp: new Date(),
+          requestId: response.metadata?.requestId || '',
+          duration: response.metadata?.duration || 0,
+          cached: response.metadata?.cached
+        }
+      };
+
+    } catch (error) {
+      this.logger.error('Failed to get asset processing status', error as Error, { assetPath });
+      
+      if (error instanceof AEMException) {
+        throw error;
+      }
+      
+      throw new AEMException(
+        `Unexpected error while getting asset processing status for ${assetPath}`,
+        'UNKNOWN_ERROR',
+        false,
+        undefined,
+        { originalError: error, assetPath }
+      );
+    }
+  }
+
+  /**
+   * Create custom rendition
+   */
+  async createCustomRendition(assetPath: string, renditionOptions: CreateCustomRenditionOptions): Promise<AEMResponse<CustomRendition>> {
+    try {
+      this.logger.debug('Creating custom rendition', { assetPath, renditionOptions });
+
+      if (!assetPath) {
+        throw new AEMException(
+          'Asset path is required',
+          'VALIDATION_ERROR',
+          false
+        );
+      }
+
+      if (!renditionOptions.name) {
+        throw new AEMException(
+          'Rendition name is required',
+          'VALIDATION_ERROR',
+          false
+        );
+      }
+
+      const formData = new FormData();
+      formData.append('renditionName', renditionOptions.name);
+      
+      if (renditionOptions.width) {
+        formData.append('width', renditionOptions.width.toString());
+      }
+      
+      if (renditionOptions.height) {
+        formData.append('height', renditionOptions.height.toString());
+      }
+      
+      if (renditionOptions.quality) {
+        formData.append('quality', renditionOptions.quality.toString());
+      }
+      
+      if (renditionOptions.format) {
+        formData.append('format', renditionOptions.format);
+      }
+
+      const requestOptions: RequestOptions = {
+        context: {
+          operation: 'createCustomRendition',
+          resource: assetPath
+        }
+      };
+
+      const response = await this.client.post<any>(
+        `${assetPath}/jcr:content/create-rendition`,
+        formData as any,
+        requestOptions
+      );
+
+      if (!response.success || !response.data) {
+        throw new AEMException(
+          `Failed to create custom rendition: ${assetPath}`,
+          'SERVER_ERROR',
+          true,
+          undefined,
+          { response }
+        );
+      }
+
+      const rendition = this.parseCustomRenditionResponse(response.data, assetPath, renditionOptions.name);
+
+      this.logger.debug('Successfully created custom rendition', { 
+        assetPath,
+        renditionName: renditionOptions.name
+      });
+
+      return {
+        success: true,
+        data: rendition,
+        metadata: {
+          timestamp: new Date(),
+          requestId: response.metadata?.requestId || '',
+          duration: response.metadata?.duration || 0
+        }
+      };
+
+    } catch (error) {
+      this.logger.error('Failed to create custom rendition', error as Error, { assetPath, renditionOptions });
+      
+      if (error instanceof AEMException) {
+        throw error;
+      }
+      
+      throw new AEMException(
+        `Unexpected error while creating custom rendition for ${assetPath}`,
+        'UNKNOWN_ERROR',
+        false,
+        undefined,
+        { originalError: error, assetPath, renditionOptions }
+      );
+    }
+  }
+
+  /**
+   * Apply smart crop to asset
+   */
+  async applySmartCrop(assetPath: string, smartCropOptions: SmartCropOptions): Promise<AEMResponse<SmartCropResult>> {
+    try {
+      this.logger.debug('Applying smart crop', { assetPath, smartCropOptions });
+
+      if (!assetPath) {
+        throw new AEMException(
+          'Asset path is required',
+          'VALIDATION_ERROR',
+          false
+        );
+      }
+
+      if (!smartCropOptions.width || !smartCropOptions.height) {
+        throw new AEMException(
+          'Width and height are required for smart crop',
+          'VALIDATION_ERROR',
+          false
+        );
+      }
+
+      const formData = new FormData();
+      formData.append('width', smartCropOptions.width.toString());
+      formData.append('height', smartCropOptions.height.toString());
+      
+      if (smartCropOptions.algorithm) {
+        formData.append('algorithm', smartCropOptions.algorithm);
+      }
+      
+      if (smartCropOptions.renditionName) {
+        formData.append('renditionName', smartCropOptions.renditionName);
+      }
+      
+      if (smartCropOptions.quality) {
+        formData.append('quality', smartCropOptions.quality.toString());
+      }
+
+      const requestOptions: RequestOptions = {
+        context: {
+          operation: 'applySmartCrop',
+          resource: assetPath
+        }
+      };
+
+      const response = await this.client.post<any>(
+        `${assetPath}/jcr:content/smart-crop`,
+        formData as any,
+        requestOptions
+      );
+
+      if (!response.success || !response.data) {
+        throw new AEMException(
+          `Failed to apply smart crop: ${assetPath}`,
+          'SERVER_ERROR',
+          true,
+          undefined,
+          { response }
+        );
+      }
+
+      const result = this.parseSmartCropResponse(response.data, assetPath);
+
+      this.logger.debug('Successfully applied smart crop', { 
+        assetPath,
+        renditionName: result.renditionName
+      });
+
+      return {
+        success: true,
+        data: result,
+        metadata: {
+          timestamp: new Date(),
+          requestId: response.metadata?.requestId || '',
+          duration: response.metadata?.duration || 0
+        }
+      };
+
+    } catch (error) {
+      this.logger.error('Failed to apply smart crop', error as Error, { assetPath, smartCropOptions });
+      
+      if (error instanceof AEMException) {
+        throw error;
+      }
+      
+      throw new AEMException(
+        `Unexpected error while applying smart crop to ${assetPath}`,
+        'UNKNOWN_ERROR',
+        false,
+        undefined,
+        { originalError: error, assetPath, smartCropOptions }
+      );
+    }
+  }
+
+  /**
+   * Process video asset
+   */
+  async processVideoAsset(assetPath: string, videoOptions: ProcessVideoOptions = {}): Promise<AEMResponse<VideoProcessResult>> {
+    try {
+      this.logger.debug('Processing video asset', { assetPath, videoOptions });
+
+      if (!assetPath) {
+        throw new AEMException(
+          'Asset path is required',
+          'VALIDATION_ERROR',
+          false
+        );
+      }
+
+      const formData = new FormData();
+      
+      if (videoOptions.generateThumbnails !== undefined) {
+        formData.append('generateThumbnails', videoOptions.generateThumbnails.toString());
+      }
+      
+      if (videoOptions.thumbnailCount) {
+        formData.append('thumbnailCount', videoOptions.thumbnailCount.toString());
+      }
+      
+      if (videoOptions.generatePreview !== undefined) {
+        formData.append('generatePreview', videoOptions.generatePreview.toString());
+      }
+      
+      if (videoOptions.previewQuality) {
+        formData.append('previewQuality', videoOptions.previewQuality.toString());
+      }
+      
+      if (videoOptions.extractMetadata !== undefined) {
+        formData.append('extractMetadata', videoOptions.extractMetadata.toString());
+      }
+
+      const requestOptions: RequestOptions = {
+        context: {
+          operation: 'processVideoAsset',
+          resource: assetPath
+        }
+      };
+
+      const response = await this.client.post<any>(
+        `${assetPath}/jcr:content/process-video`,
+        formData as any,
+        requestOptions
+      );
+
+      if (!response.success || !response.data) {
+        throw new AEMException(
+          `Failed to process video asset: ${assetPath}`,
+          'SERVER_ERROR',
+          true,
+          undefined,
+          { response }
+        );
+      }
+
+      const result = this.parseVideoProcessResponse(response.data, assetPath);
+
+      this.logger.debug('Successfully processed video asset', { 
+        assetPath,
+        thumbnailCount: result.thumbnailCount
+      });
+
+      return {
+        success: true,
+        data: result,
+        metadata: {
+          timestamp: new Date(),
+          requestId: response.metadata?.requestId || '',
+          duration: response.metadata?.duration || 0
+        }
+      };
+
+    } catch (error) {
+      this.logger.error('Failed to process video asset', error as Error, { assetPath, videoOptions });
+      
+      if (error instanceof AEMException) {
+        throw error;
+      }
+      
+      throw new AEMException(
+        `Unexpected error while processing video asset ${assetPath}`,
+        'UNKNOWN_ERROR',
+        false,
+        undefined,
+        { originalError: error, assetPath, videoOptions }
+      );
+    }
+  }
+
+  /**
+   * Parse asset processing status response
+   */
+  private parseAssetProcessingStatus(data: any, assetPath: string): AssetProcessingStatus {
+    return {
+      assetPath,
+      status: data.status || 'UNKNOWN',
+      processingSteps: data.processingSteps || [],
+      lastProcessed: data.lastProcessed ? new Date(data.lastProcessed) : undefined,
+      errorMessage: data.errorMessage,
+      processingTime: data.processingTime || 0,
+      renditionsGenerated: data.renditionsGenerated || 0
+    };
+  }
+
+  /**
+   * Parse custom rendition response
+   */
+  private parseCustomRenditionResponse(data: any, assetPath: string, renditionName: string): CustomRendition {
+    return {
+      name: renditionName,
+      path: `${assetPath}/jcr:content/renditions/${renditionName}`,
+      width: data.width,
+      height: data.height,
+      size: data.size || 0,
+      mimeType: data.mimeType || 'image/jpeg',
+      quality: data.quality,
+      format: data.format,
+      created: new Date()
+    };
+  }
+
+  /**
+   * Parse smart crop response
+   */
+  private parseSmartCropResponse(data: any, assetPath: string): SmartCropResult {
+    return {
+      assetPath,
+      renditionName: data.renditionName || 'smart-crop',
+      renditionPath: `${assetPath}/jcr:content/renditions/${data.renditionName || 'smart-crop'}`,
+      width: data.width,
+      height: data.height,
+      cropCoordinates: data.cropCoordinates,
+      algorithm: data.algorithm,
+      confidence: data.confidence,
+      created: new Date()
+    };
+  }
+
+  /**
+   * Parse video process response
+   */
+  private parseVideoProcessResponse(data: any, assetPath: string): VideoProcessResult {
+    return {
+      assetPath,
+      thumbnailCount: data.thumbnailCount || 0,
+      thumbnails: data.thumbnails || [],
+      previewGenerated: data.previewGenerated || false,
+      previewPath: data.previewPath,
+      metadataExtracted: data.metadataExtracted || false,
+      duration: data.duration,
+      bitrate: data.bitrate,
+      resolution: data.resolution,
+      processingTime: data.processingTime || 0,
+      created: new Date()
+    };
+  }
+}
+
+// Additional interfaces for asset enhancements
+export interface AssetProcessingStatus {
+  assetPath: string;
+  status: 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'PENDING' | 'UNKNOWN';
+  processingSteps: string[];
+  lastProcessed?: Date;
+  errorMessage?: string;
+  processingTime: number;
+  renditionsGenerated: number;
+}
+
+export interface CreateCustomRenditionOptions {
+  name: string;
+  width?: number;
+  height?: number;
+  quality?: number;
+  format?: string;
+}
+
+export interface CustomRendition {
+  name: string;
+  path: string;
+  width?: number;
+  height?: number;
+  size: number;
+  mimeType: string;
+  quality?: number;
+  format?: string;
+  created: Date;
+}
+
+export interface SmartCropOptions {
+  width: number;
+  height: number;
+  algorithm?: 'face-detection' | 'saliency' | 'center-weighted';
+  renditionName?: string;
+  quality?: number;
+}
+
+export interface SmartCropResult {
+  assetPath: string;
+  renditionName: string;
+  renditionPath: string;
+  width: number;
+  height: number;
+  cropCoordinates?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  algorithm: string;
+  confidence?: number;
+  created: Date;
+}
+
+export interface ProcessVideoOptions {
+  generateThumbnails?: boolean;
+  thumbnailCount?: number;
+  generatePreview?: boolean;
+  previewQuality?: number;
+  extractMetadata?: boolean;
+}
+
+export interface VideoProcessResult {
+  assetPath: string;
+  thumbnailCount: number;
+  thumbnails: Array<{
+    name: string;
+    path: string;
+    timestamp: number;
+    width: number;
+    height: number;
+  }>;
+  previewGenerated: boolean;
+  previewPath?: string;
+  metadataExtracted: boolean;
+  duration?: number;
+  bitrate?: number;
+  resolution?: string;
+  processingTime: number;
+  created: Date;
 }

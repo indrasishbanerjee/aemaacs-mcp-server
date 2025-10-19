@@ -24,10 +24,16 @@ export class STDIOHandler {
   private logger: Logger;
   private mcpHandler: MCPHandler;
   private running: boolean = false;
+  private initialized: boolean = false;
+  private requestQueue: Map<string | number, { timestamp: number; timeout: NodeJS.Timeout }> = new Map();
+  private maxRequestTimeout: number = 30000; // 30 seconds
 
   constructor(client: AEMHttpClient) {
     this.logger = Logger.getInstance();
     this.mcpHandler = new MCPHandler(client);
+    
+    // Clean up request queue periodically
+    setInterval(() => this.cleanupRequestQueue(), 60000); // Every minute
   }
 
   /**
@@ -138,6 +144,11 @@ export class STDIOHandler {
   private async handleMethodCall(message: MCPMessage): Promise<void> {
     const { method, params, id } = message;
 
+    // Add request to queue for timeout tracking (except for ping)
+    if (method !== 'ping' && id !== undefined) {
+      this.addRequestToQueue(id);
+    }
+
     try {
       switch (method) {
         case 'initialize':
@@ -165,6 +176,11 @@ export class STDIOHandler {
       
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       this.sendErrorResponse(id, -32603, `Internal error: ${errorMessage}`);
+    } finally {
+      // Remove request from queue
+      if (id !== undefined) {
+        this.removeRequestFromQueue(id);
+      }
     }
   }
 
@@ -174,10 +190,19 @@ export class STDIOHandler {
   private async handleInitialize(params: any, id?: string | number): Promise<void> {
     this.logger.info('Handling MCP initialize request', { params });
 
+    this.initialized = true;
+
     const response = {
       protocolVersion: '2024-11-05',
       capabilities: {
         tools: {
+          listChanged: true
+        },
+        resources: {
+          subscribe: true,
+          listChanged: true
+        },
+        prompts: {
           listChanged: true
         }
       },
@@ -212,6 +237,14 @@ export class STDIOHandler {
       return;
     }
 
+    // Check if this is a streaming request
+    const isStreaming = params.stream === true;
+    
+    if (isStreaming) {
+      await this.handleStreamingToolCall(params, id);
+      return;
+    }
+
     const request: MCPRequest = {
       method: 'tools/call',
       params: {
@@ -220,12 +253,83 @@ export class STDIOHandler {
       }
     };
 
-    const response = await this.mcpHandler.executeTool(request);
-    
-    if (response.isError) {
-      this.sendErrorResponse(id, -32603, response.content?.[0]?.text || 'Tool execution failed');
-    } else {
-      this.sendResponse(id, response);
+    try {
+      const response = await this.mcpHandler.executeTool(request);
+      
+      if (response.isError) {
+        this.sendErrorResponse(id, -32603, response.content?.[0]?.text || 'Tool execution failed');
+      } else {
+        this.sendResponse(id, response);
+      }
+    } catch (error) {
+      this.logger.error('Error executing tool', error as Error, { toolName: params.name });
+      this.sendErrorResponse(id, -32603, `Tool execution failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Handle streaming tool call
+   */
+  private async handleStreamingToolCall(params: any, id?: string | number): Promise<void> {
+    this.logger.debug('Handling streaming tool call', { toolName: params?.name });
+
+    const request: MCPRequest = {
+      method: 'tools/call',
+      params: {
+        name: params.name,
+        arguments: params.arguments || {}
+      }
+    };
+
+    try {
+      // Send initial response indicating streaming has started
+      this.sendResponse(id, {
+        streaming: true,
+        status: 'started'
+      });
+
+      // Execute tool with streaming support
+      const response = await this.mcpHandler.executeTool(request);
+      
+      if (response.isError) {
+        this.sendErrorResponse(id, -32603, response.content?.[0]?.text || 'Streaming tool execution failed');
+        return;
+      }
+
+      // For large responses, stream the content in chunks
+      if (response.content && response.content.length > 0) {
+        const content = response.content[0]?.text || '';
+        const chunkSize = 1024; // 1KB chunks
+        
+        for (let i = 0; i < content.length; i += chunkSize) {
+          const chunk = content.slice(i, i + chunkSize);
+          
+          this.sendResponse(id, {
+            streaming: true,
+            status: 'progress',
+            chunk: chunk,
+            progress: {
+              current: i + chunkSize,
+              total: content.length,
+              percentage: Math.round(((i + chunkSize) / content.length) * 100)
+            }
+          });
+          
+          // Small delay to prevent overwhelming the client
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+      }
+
+      // Send final response
+      this.sendResponse(id, {
+        streaming: true,
+        status: 'completed',
+        result: response
+      });
+
+    } catch (error) {
+      this.logger.error('Error executing streaming tool', error as Error, { toolName: params.name });
+      this.sendErrorResponse(id, -32603, `Streaming tool execution failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
@@ -293,5 +397,72 @@ export class STDIOHandler {
     this.logger.error('STDIN error', error);
     this.stop();
     process.exit(1);
+  }
+
+  /**
+   * Clean up request queue
+   */
+  private cleanupRequestQueue(): void {
+    const now = Date.now();
+    const expiredRequests: (string | number)[] = [];
+
+    for (const [id, requestInfo] of this.requestQueue.entries()) {
+      if (now - requestInfo.timestamp > this.maxRequestTimeout) {
+        expiredRequests.push(id);
+        clearTimeout(requestInfo.timeout);
+      }
+    }
+
+    for (const id of expiredRequests) {
+      this.requestQueue.delete(id);
+      this.sendErrorResponse(id, -32603, 'Request timeout');
+    }
+
+    if (expiredRequests.length > 0) {
+      this.logger.debug(`Cleaned up ${expiredRequests.length} expired requests`);
+    }
+  }
+
+  /**
+   * Add request to queue for timeout tracking
+   */
+  private addRequestToQueue(id: string | number): void {
+    const timeout = setTimeout(() => {
+      this.requestQueue.delete(id);
+      this.sendErrorResponse(id, -32603, 'Request timeout');
+    }, this.maxRequestTimeout);
+
+    this.requestQueue.set(id, {
+      timestamp: Date.now(),
+      timeout
+    });
+  }
+
+  /**
+   * Remove request from queue
+   */
+  private removeRequestFromQueue(id: string | number): void {
+    const requestInfo = this.requestQueue.get(id);
+    if (requestInfo) {
+      clearTimeout(requestInfo.timeout);
+      this.requestQueue.delete(id);
+    }
+  }
+
+  /**
+   * Get handler statistics
+   */
+  public getStats(): {
+    running: boolean;
+    initialized: boolean;
+    pendingRequests: number;
+    maxRequestTimeout: number;
+  } {
+    return {
+      running: this.running,
+      initialized: this.initialized,
+      pendingRequests: this.requestQueue.size,
+      maxRequestTimeout: this.maxRequestTimeout
+    };
   }
 }
