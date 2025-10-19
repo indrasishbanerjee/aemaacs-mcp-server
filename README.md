@@ -272,7 +272,7 @@ Add this configuration to your **Cursor Settings > Features > Model Context Prot
     "aemaacs-read-server": {
       "command": "node",
       "args": ["aemaacs-read-server.js", "--stdio"],
-      "cwd": "C:\\Users\\indra\\Documents\\GitHub\\aemaacs-mcp-server",
+      "cwd": "/path/to/your/project",
       "env": {
         "AEM_HOST": "https://mock-aem-instance.com",
         "AEM_CLIENT_ID": "mock-client-id",
@@ -284,7 +284,7 @@ Add this configuration to your **Cursor Settings > Features > Model Context Prot
     "aemaacs-write-server": {
       "command": "node",
       "args": ["aemaacs-write-server.js", "--stdio"],
-      "cwd": "C:\\Users\\indra\\Documents\\GitHub\\aemaacs-mcp-server",
+      "cwd": "/path/to/your/project",
       "env": {
         "AEM_HOST": "https://mock-aem-instance.com",
         "AEM_CLIENT_ID": "mock-client-id",
@@ -375,6 +375,6 @@ docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 
 ## License
 
-This software is licensed under the Server Side Public License (SSPL). For commercial use in enterprise environments, a paid license is required. Contact [indrasish00@gmail.com](mailto:indrasish00@gmail.com) for details.
+This software is licensed under the Server Side Public License (SSPL). For commercial use in enterprise environments, a paid license is required. Contact [HERE](mailto:indrasish00@gmail.com) for details.
 
 See the [LICENSE](LICENSE) file for the full license text.
