@@ -1,6 +1,6 @@
 # AEMaaCS MCP Servers
 
-> **License Notice**: This software is licensed under the Server Side Public License (SSPL). For commercial use in enterprise environments, a paid license is required. Contact [HERE](mailto:indrasish00@gmail.com) for details.
+> **License Notice**: This software is licensed under the Server Side Public License (SSPL). For commercial use in enterprise environments, a paid license is required. Contact [HERE](https://techmate.in/contact) for details.
 
 Two separate Model Context Protocol (MCP) servers for Adobe Experience Manager as a Cloud Service (AEMaaCS):
 
