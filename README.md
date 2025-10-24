@@ -2,10 +2,16 @@
 
 > **License Notice**: This software is licensed under the Server Side Public License (SSPL). For commercial use in enterprise environments, a paid license is required. Contact [HERE](https://techmate.in/contact) for details.
 
-Two separate Model Context Protocol (MCP) servers for Adobe Experience Manager as a Cloud Service (AEMaaCS):
+## Connect AI Tools to Adobe Experience Manager
 
-- **aemaacs-mcp-read-server**: Read-only operations for safe content exploration
-- **aemaacs-mcp-write-server**: Write operations for content management and automation
+Transform how you interact with Adobe Experience Manager as a Cloud Service (AEMaaCS) by connecting your favorite AI tools through Model Context Protocol (MCP). These servers provide a secure, high-performance bridge between AI assistants and your AEM instance.
+
+### Two Powerful Servers
+
+🔍 **Read Server**: Safely explore and analyze your AEM content with 50+ read-only operations  
+✏️ **Write Server**: Manage and automate content creation with 40+ write operations
+
+Perfect for content teams, developers, and AI-powered workflows that need seamless AEM integration.
 
 ## Project Structure -
 
@@ -45,16 +51,18 @@ npm run lint
 
 ### Environment Configuration
 
-Copy `.env.example` to `.env` and configure your AEMaaCS connection:
+The servers automatically load configuration from a `.env` file. This keeps your credentials secure and separate from your MCP configuration.
 
-```bash
-cp .env.example .env
-```
+**Required Steps:**
+1. Copy the example environment file: `cp .env.example .env`
+2. Edit `.env` with your AEMaaCS credentials
+3. The MCP servers will automatically use these settings
 
-Key configuration options:
-- `AEM_HOST`: Your AEMaaCS instance hostname
-- `AEM_AUTH_TYPE`: Authentication method (basic, oauth, service-account)
-- `AEM_USERNAME/AEM_PASSWORD`: Basic auth credentials
+**Key Configuration Options:**
+- `AEM_HOST`: Your AEMaaCS instance URL (e.g., `https://your-instance.adobeaemcloud.com`)
+- `AEM_AUTH_TYPE`: Authentication method (`oauth` for OAuth 2.0 Server-to-Server)
+- `AEM_CLIENT_ID` & `AEM_CLIENT_SECRET`: OAuth 2.0 credentials
+- `API_KEY`: Secure key for write operations
 
 ## Architecture
 
@@ -151,42 +159,17 @@ GitHub Actions workflow includes:
 - Docker image building and publishing
 - Integration testing with services
 
-## Development Status
+## Why Use AEMaaCS MCP Servers?
 
-✅ **Completed**: 
-- Project structure and development infrastructure
-- Core AEM HTTP client implementation with authentication (OAuth, Service Account, Basic)
-- Complete service layer for read and write operations
-- MCP protocol handlers for both servers with JSON-RPC 2.0 compliance
-- HTTP REST API handlers for both servers
-- Configuration management system with hot-reload support
-- Comprehensive error handling and logging with audit capabilities
-- Security middleware and validation (API keys, IP allowlisting, rate limiting)
-- Redis cache adapter with connection pooling
-- Circuit breaker integration with fallback mechanisms
-- Bulk operations with progress tracking
-- Content Fragment operations (models, variations, references)
-- Workflow management (discovery, instances, tasks)
-- Version management (creation, comparison, restoration, labeling)
-- Advanced search with QueryBuilder support, facets, and pagination
-- Asset enhancements (processing status, custom renditions, smart crop, video)
-- Permission management (ACL reading, effective permissions, validation)
-- Template component management (discovery, usage analysis, dependencies)
-- Enhanced replication (queue status, agent management, scheduled publishing)
-- Prometheus metrics collection with custom business metrics
-- Comprehensive health check endpoints
-- Automatic retry with exponential backoff
-- Input validation for paths, content, file uploads, and JCR properties
-- Unit tests (80%+ coverage), integration tests, and end-to-end tests
-- Dangerous operation confirmation enforcement
+🚀 **Seamless Integration**: Connect your favorite AI tools directly to Adobe Experience Manager as a Cloud Service
 
-🚀 **Production Ready**: Both read and write servers are fully implemented with enterprise-grade features and comprehensive testing
+🔒 **Enterprise Security**: Built with security-first design, supporting service account authentication, API keys, and audit logging
 
-📋 **Available Features**: 
-- Advanced caching and performance optimization with Redis
-- Enhanced monitoring and observability with Prometheus
-- Comprehensive security features and audit logging
-- Complete documentation and deployment guides
+⚡ **High Performance**: Advanced caching, connection pooling, and optimized queries for fast content operations
+
+🛡️ **Safe Operations**: Separate read and write servers ensure you can explore content safely before making changes
+
+📊 **Rich Functionality**: 50+ read operations and 40+ write operations covering all major AEM workflows
 
 ## Contributing
 
@@ -208,61 +191,66 @@ GitHub Actions workflow includes:
 
 ## Quick Start
 
-### Option 1: Simplified Servers (Recommended for Testing)
+### Get Started in 3 Steps
 
-1. **Install Dependencies**:
+1. **Clone and Install**:
    ```bash
+   git clone <repository-url>
+   cd aemaacs-mcp-servers
    npm install
    ```
 
-2. **Start Both Servers**:
+2. **Configure Your AEM Connection**:
    ```bash
-   node start-both-servers.js
-   ```
-   This will start:
-   - AEMaaCS Read Server on http://localhost:3003
-   - AEMaaCS Write Server on http://localhost:3004
-
-3. **Test Connection**:
-   ```bash
-   curl http://localhost:3003/health
-   curl http://localhost:3004/health
-   curl -H "X-API-Key: development-api-key-12345" http://localhost:3004/api/tools
-   ```
-
-### Option 2: Full Development Build
-
-1. **Install and Build**:
-   ```bash
-   npm install && npm run build
-   ```
-
-2. **Configure Environment**:
-   ```bash
+   # Copy the example environment file
    cp .env.example .env
+   
    # Edit .env with your AEMaaCS credentials
+   # See "Getting Your AEM Credentials" section below
    ```
 
-3. **Start Read Server**:
+3. **Start the Servers**:
    ```bash
+   # Option A: Start both servers (recommended for testing)
+   node start-both-servers.js
+   
+   # Option B: Start individual servers
    cd packages/read-server && npm start
-   # Server available at http://localhost:3001
-   ```
-
-4. **Start Write Server**:
-   ```bash
    cd packages/write-server && npm start
-   # Server available at http://localhost:3002
    ```
 
-5. **Test Connection**:
+4. **Test Your Connection**:
    ```bash
-   curl http://localhost:3001/health
+   # Test read server
+   curl http://localhost:3003/health
+   
+   # Test write server (requires API key)
+   curl -H "X-API-Key: development-api-key-12345" http://localhost:3004/health
    ```
 
 ## MCP Integration
 
-### Cursor MCP Configuration
+### Step 1: Configure Your AEM Connection
+
+First, create a `.env` file in your project root with your AEMaaCS credentials:
+
+```bash
+# AEM Connection (Required)
+AEM_HOST=https://your-instance.adobeaemcloud.com
+AEM_AUTH_TYPE=oauth
+AEM_CLIENT_ID=your-client-id
+AEM_CLIENT_SECRET=your-client-secret
+
+# Server Configuration
+LOG_LEVEL=info
+
+# Security (for write server)
+API_KEY=your-secure-api-key
+```
+
+### Step 2: Configure Your MCP Client
+
+#### Cursor MCP Configuration
 
 Add this configuration to your **Cursor Settings > Features > Model Context Protocol**:
 
@@ -272,35 +260,20 @@ Add this configuration to your **Cursor Settings > Features > Model Context Prot
     "aemaacs-read-server": {
       "command": "node",
       "args": ["aemaacs-read-server.js", "--stdio"],
-      "cwd": "/path/to/your/project",
-      "env": {
-        "AEM_HOST": "https://mock-aem-instance.com",
-        "AEM_CLIENT_ID": "mock-client-id",
-        "AEM_CLIENT_SECRET": "mock-client-secret",
-        "LOG_LEVEL": "info",
-        "MOCK_AEM": "true"
-      }
+      "cwd": "/path/to/your/project"
     },
     "aemaacs-write-server": {
       "command": "node",
       "args": ["aemaacs-write-server.js", "--stdio"],
-      "cwd": "/path/to/your/project",
-      "env": {
-        "AEM_HOST": "https://mock-aem-instance.com",
-        "AEM_CLIENT_ID": "mock-client-id",
-        "AEM_CLIENT_SECRET": "mock-client-secret",
-        "API_KEY": "development-api-key-12345",
-        "LOG_LEVEL": "info",
-        "MOCK_AEM": "true"
-      }
+      "cwd": "/path/to/your/project"
     }
   }
 }
 ```
 
-**Note**: Replace the `cwd` path with your actual project directory path.
+**Note**: Replace the `cwd` path with your actual project directory path. The servers will automatically load configuration from your `.env` file.
 
-### Claude Desktop Configuration
+#### Claude Desktop Configuration
 
 Add to your `claude_desktop_config.json`:
 
@@ -310,47 +283,59 @@ Add to your `claude_desktop_config.json`:
     "aemaacs-read": {
       "command": "node",
       "args": ["aemaacs-read-server.js", "--stdio"],
-      "cwd": "/path/to/your/project",
-      "env": {
-        "AEM_HOST": "https://your-instance.adobeaemcloud.com",
-        "AEM_CLIENT_ID": "your-client-id",
-        "AEM_CLIENT_SECRET": "your-client-secret",
-        "LOG_LEVEL": "info",
-        "MOCK_AEM": "true"
-      }
+      "cwd": "/path/to/your/project"
     },
     "aemaacs-write": {
       "command": "node",
       "args": ["aemaacs-write-server.js", "--stdio"],
-      "cwd": "/path/to/your/project",
-      "env": {
-        "AEM_HOST": "https://your-instance.adobeaemcloud.com",
-        "AEM_CLIENT_ID": "your-client-id",
-        "AEM_CLIENT_SECRET": "your-client-secret",
-        "API_KEY": "your-secure-api-key",
-        "LOG_LEVEL": "info",
-        "MOCK_AEM": "true"
-      }
+      "cwd": "/path/to/your/project"
     }
   }
 }
 ```
 
-### Available Tools
+### Getting Your AEM Credentials
 
-**Read Server** (50+ tools):
-- Content discovery (`listPages`, `getPageContent`)
-- Asset management (`listAssets`, `getAssetMetadata`)
-- Search and query (`searchContent`, `searchAssets`)
-- User administration (`listUsers`, `getUserProfile`)
-- System monitoring (`getSystemHealth`, `getSystemInfo`)
+To get the required AEMaaCS credentials using OAuth 2.0 (Adobe's current authentication method):
 
-**Write Server** (40+ tools):
-- Package management (`createPackage`, `installPackage`)
-- Page operations (`createPage`, `copyPage`, `deletePage`)
-- Asset operations (`uploadAsset`, `updateAsset`)
-- Publishing (`publishContent`, `unpublishContent`)
-- User management (`createUser`, `createGroup`)
+1. **Go to Adobe Developer Console**: https://developer.adobe.com/console/
+2. **Create a new project** or select an existing one
+3. **Add AEM API** to your project
+4. **Generate OAuth 2.0 credentials** for server-to-server authentication
+5. **Copy the Client ID and Client Secret** from your project credentials to the `.env` file
+
+### Why Use .env File Configuration?
+
+✅ **Security**: Keep sensitive credentials out of your MCP configuration files  
+✅ **Simplicity**: No need to duplicate environment variables in multiple places  
+✅ **Flexibility**: Easy to change configuration without modifying MCP settings  
+✅ **Best Practice**: Standard approach for managing environment-specific settings  
+✅ **Version Control Safe**: `.env` files are typically ignored by Git
+
+### What Can You Do?
+
+#### 🔍 Read Server - Explore & Analyze
+- **Content Discovery**: Browse pages, components, and content fragments
+- **Asset Management**: Search and analyze digital assets in DAM
+- **Advanced Search**: Query content using AEM's QueryBuilder API
+- **User Administration**: Manage users, groups, and permissions
+- **System Monitoring**: Check AEM health, performance, and status
+- **Workflow Tracking**: Monitor active workflows and tasks
+
+#### ✏️ Write Server - Create & Manage
+- **Content Creation**: Create pages, components, and content fragments
+- **Asset Operations**: Upload, update, and process digital assets
+- **Package Management**: Create, install, and manage AEM packages
+- **Publishing**: Publish content to publish tier with workflow support
+- **User Management**: Create users, groups, and manage permissions
+- **Bulk Operations**: Efficiently manage large-scale content changes
+
+#### 🚀 Real-World Use Cases
+- **AI Content Generation**: Let AI create and populate AEM pages
+- **Automated Asset Processing**: Batch upload and process digital assets
+- **Content Migration**: Streamline content migration between environments
+- **Quality Assurance**: Automated content validation and testing
+- **Performance Monitoring**: Continuous monitoring of AEM performance
 
 ## Production Deployment
 
